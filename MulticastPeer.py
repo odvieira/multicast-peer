@@ -1,24 +1,20 @@
-import asyncio
 import os
-import re
 import socket
 import struct
+from time import time
 
 class MulticastPeer:
     def __init__(self, group:str='228.5.6.7', port:int=6789):
         self.group = group
         self.port = port
-        pass
+        self.state = 'RELEASED'
 
-    def auto(self):
-        print('Eu sou {0}'.format(os.getpid()))
-
-        for i in range(2):
-            self.send('oi {0} do {1}'.format(i, os.getpid()).encode())
+    def test(self, number_of_tries=2):
+        for i in range(number_of_tries):
+            self.send('{0} {1} {2}'.format(os.getpid(), time(), self.state).encode())
         
 
-    def send(self, msg:bytes):
-        message = msg
+    def send(self, message:bytes):
         multicast_group = (self.group, self.port)
 
         # Create the datagram socket
@@ -26,7 +22,7 @@ class MulticastPeer:
 
         # Set a timeout so the socket does not block
         # indefinitely when trying to receive data.
-        sock.settimeout(20)
+        sock.settimeout(0.2)
 
         # Set the time-to-live for messages to 1 so they do not
         # go past the local network segment.
@@ -35,23 +31,29 @@ class MulticastPeer:
 
         try:
             # Send data to the multicast group
-            print('sending {!r}'.format(message))
+            # print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+            # print('sending {!r}'.format(message))
             sent = sock.sendto(message, multicast_group)
 
             # Look for responses from all recipients
             while True:
-                print('waiting to receive')
+                # print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+                # print('waiting to receive a response')
                 try:
                     data, server = sock.recvfrom(16)
                 except socket.timeout:
-                    print('timed out, no more responses')
+                    # print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+                    # print('timed out, no more responses')
                     break
                 else:
-                    print('received {!r} from {}'.format(
-                        data, server))
+                    # print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+                    # print('received {!r} from {}\n'.format(
+                    #     data, server))
+                    pass
 
         finally:
-            print('closing socket')
+            # print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+            # print('closing socket')
             sock.close()
 
         return
@@ -81,24 +83,36 @@ class MulticastPeer:
 
         # Receive/respond loop
         while True:
-            print('\nwaiting to receive message')
+            # print('\nPeer [{0}]: waiting to receive message'.format(os.getpid()))
 
             try:
-                data, address = sock.recvfrom(1024)
+                data, address = sock.recvfrom(4096)
+                received_message = data.decode().split(' ')    
 
-                if data == b'WANTED':
-                    print(address,'wants the resource')
-                elif data == b'HELD':
-                    print(address, 'hold the resource')
+                # print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+                # print(received_message)
+
+                if received_message[2] == 'RELEASED':
+                    print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+                    print(address,'({0}) released the resource'.format(received_message[0]))                    
+                elif received_message[2] == 'WANTED':
+                    print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+                    print(address,'({0}) wants the resource'.format(received_message[0]))
+                elif received_message[2] == 'HELD':
+                    print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
+                    print(address, '({0}) is holding the resource'.format(received_message[0]))
                 else:
+                    print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
                     print('received {} bytes from {}'.format(
                     len(data), address))
                     print(data)
-                                    
-                print('sending acknowledgement to', address)
+
+                # print('\nPeer [{0}]:'.format(os.getpid()), end=' ') 
+                # print('sending acknowledgement to', address)
                 sock.sendto(b'ack', address)
 
             except socket.timeout:
+                print('\nPeer [{0}]:'.format(os.getpid()), end=' ')
                 print('timed out, no more responses')
                 break
             
