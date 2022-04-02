@@ -1,3 +1,6 @@
+import asyncio
+import os
+import re
 import socket
 import struct
 
@@ -7,10 +10,14 @@ class MulticastPeer:
         self.port = port
         pass
 
-    def AcquireLock(self, resource):
-        pass
+    def auto(self):
+        print('Eu sou {0}'.format(os.getpid()))
 
-    def Send(self, msg:bytes):
+        for i in range(2):
+            self.send('oi {0} do {1}'.format(i, os.getpid()).encode())
+        
+
+    def send(self, msg:bytes):
         message = msg
         multicast_group = (self.group, self.port)
 
@@ -19,7 +26,7 @@ class MulticastPeer:
 
         # Set a timeout so the socket does not block
         # indefinitely when trying to receive data.
-        sock.settimeout(0.2)
+        sock.settimeout(20)
 
         # Set the time-to-live for messages to 1 so they do not
         # go past the local network segment.
@@ -27,7 +34,6 @@ class MulticastPeer:
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
 
         try:
-
             # Send data to the multicast group
             print('sending {!r}'.format(message))
             sent = sock.sendto(message, multicast_group)
@@ -50,15 +56,19 @@ class MulticastPeer:
 
         return
 
-    def Listen(self):
+        
+    def listen(self):
         multicast_group = self.group
         server_address = (self.group, self.port)
 
         # Create the socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 
         # Bind to the server address
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(server_address)
+
+        # sock.settimeout(100)
 
         # Tell the operating system to add the socket to
         # the multicast group on all interfaces.
@@ -72,16 +82,26 @@ class MulticastPeer:
         # Receive/respond loop
         while True:
             print('\nwaiting to receive message')
-            data, address = sock.recvfrom(1024)
 
-            print('received {} bytes from {}'.format(
-                len(data), address))
-            print(data)
+            try:
+                data, address = sock.recvfrom(1024)
 
-            print('sending acknowledgement to', address)
-            sock.sendto(b'ack', address)
+                if data == b'WANTED':
+                    print(address,'wants the resource')
+                elif data == b'HELD':
+                    print(address, 'hold the resource')
+                else:
+                    print('received {} bytes from {}'.format(
+                    len(data), address))
+                    print(data)
+                                    
+                print('sending acknowledgement to', address)
+                sock.sendto(b'ack', address)
 
+            except socket.timeout:
+                print('timed out, no more responses')
+                break
+            
         return
-
 
         

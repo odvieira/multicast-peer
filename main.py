@@ -1,30 +1,30 @@
 import multiprocessing as mp
+import asyncio
 from MulticastPeer import MulticastPeer
 
-def AutoRun(peer:MulticastPeer):
-    with mp.Pool(processes=2) as pool:
-        result = pool.apply_async(peer.Listen)
-        print(result.get(timeout=3))
+async def peer_start(peer):
+    await asyncio.sleep(1)
 
+    await asyncio.gather(
+        asyncio.to_thread(peer.listen),
+        asyncio.to_thread(peer.auto)
+    )
+
+def auto_start(peer):
+    asyncio.run(peer_start(peer=peer))
     
+
 if __name__ == '__main__':
-    mp.set_start_method('spawn')
+    mp.set_start_method('fork')
     main_queue = mp.Queue()
 
-    peer_one = MulticastPeer()
-    peer_two = MulticastPeer()
-    peer_three = MulticastPeer()
+    peers = []
 
-    process_one = mp.Process(target=AutoRun, args=(peer_one))
-    process_two = mp.Process(target=AutoRun, args=(peer_two))
-    process_three = mp.Process(target=AutoRun, args=(peer_three))
+    for i in range(3):
+        peers.append(MulticastPeer())
+        process = mp.Process(target=auto_start, args=[peers[-1]])
+        process.start()
 
-    process_one.start()
-    process_one.join()
+        # main_queue.put(process)
 
-    process_two.start()
-    process_two.join()
-
-    process_three.start()
-    process_three.join()
-
+        # print(main_queue.qsize())

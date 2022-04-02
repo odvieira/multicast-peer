@@ -2,6 +2,6 @@ from MulticastPeer import MulticastPeer
 
 peer = MulticastPeer()
 
-peer.Send(b'Hello')
+peer.send(b'Hello')
 
-peer.Send(b'Bye')
+peer.send(b'Bye')
