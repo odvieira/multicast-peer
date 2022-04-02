@@ -1,8 +1,10 @@
 import multiprocessing as mp
-import MulticastPeer
+from MulticastPeer import MulticastPeer
 
 def AutoRun(peer:MulticastPeer):
-    peer.Listen()
+    with mp.Pool(processes=2) as pool:
+        result = pool.apply_async(peer.Listen)
+        print(result.get(timeout=3))
 
     
 if __name__ == '__main__':

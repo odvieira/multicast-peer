@@ -1,12 +1,13 @@
 import socket
 import struct
 
-class MulticastPeer(object):
+class MulticastPeer:
     def __init__(self, group:str='228.5.6.7', port:int=6789):
         self.group = group
         self.port = port
+        pass
 
-    def AcquireLock(resource):
+    def AcquireLock(self, resource):
         pass
 
     def Send(self, msg:bytes):
@@ -47,11 +48,9 @@ class MulticastPeer(object):
             print('closing socket')
             sock.close()
 
-    def Listen(self):
-        import socket
-        import struct
-        import sys
+        return
 
+    def Listen(self):
         multicast_group = self.group
         server_address = (self.group, self.port)
 
@@ -81,6 +80,8 @@ class MulticastPeer(object):
 
             print('sending acknowledgement to', address)
             sock.sendto(b'ack', address)
+
+        return
 
 
         
