@@ -3,6 +3,7 @@ import multiprocessing
 import select
 import socket
 import struct
+import sys
 from time import time
 
 
@@ -36,7 +37,7 @@ class MulticastPeer():
 
 		# The socket does not block
 		# indefinitely when trying to receive data.
-		sock.settimeout(1)
+		sock.setblocking(0)
 
 		# Set the time-to-live for messages to 1 so they do not
 		# go past the local network segment.
@@ -48,23 +49,41 @@ class MulticastPeer():
 			'{0} {1} {2}'.format(
 				self.id, time(), 'JOIN').encode(), multicast_group)
 
-		while True:
-			try:
-				data, address = sock.recvfrom(4096, socket.MSG_DONTWAIT)
-			except socket.timeout:
-				sock.close()
-				return 1
-			else:
-				if not data:
-						await asyncio.sleep(0.5)
-						continue
+		# Sockets from which we expect to read
+		inputs=[sock]
 
-				print('\nPeer [{0}]:'.format(self.id), end=' ')
-				print('{!r} received from {}'.format(data, address))
+		# Sockets to which we expect to write
+		outputs=[]
 
-			finally:
-				sock.close()
-				return 0
+		while inputs:
+			readable, writable, exceptional = select.select(\
+				inputs, outputs, inputs, 0)
+			
+			if len(readable) == 0:
+				await asyncio.sleep(0.01)
+
+			for s in readable:
+				if s is sock:
+					try:
+						data, address=s.recvfrom(4096)
+					except:
+						raise
+					else:
+						if not data:
+							await asyncio.sleep(0.01)
+							continue
+
+						received_message=data.decode().split(' ')
+
+						res={}
+
+						res['id']=received_message[0]
+						res['time']=received_message[1]
+						res['status']=received_message[2]
+						res['address']=address
+
+					if res['id'] not in self.group_members:
+						self.group_members.append(res['id'])
 
 	async def active(self):
 		while True:
@@ -75,20 +94,36 @@ class MulticastPeer():
 					self.pipe_end.close()
 					exit(0)
 				else:
-					print('comando: ', command_received)
-
 					if command_received == 'JOIN':
 						await self.join()
+					if command_received == 'RLOCK':
+						await self.request_lock()
+
 			else:
 				await asyncio.sleep(0.2)
 
+	def release_lock(self):
+		pass
+
 	async def request_lock(self, verbose_flag: bool = True) -> int:
+		"""
+		Args:
+			message (bytes): Every package sent must be formated as follows
+								[ID] [TIME] [STATUS]
+
+			verbose_flag (bool, optional): Print to the output internal states. Defaults to True.
+
+		Returns:
+			int:    0 - all responses were received as expected
+							1 - responses number were below the expected
+		"""
+
 		self.state = 'WANTED'
 		self.request_time = time()
 
 		msg = '{0} {1} {2}'.format(
-			self.id, self.request_time,
-			self.state).encode()
+		self.id, self.request_time,
+		self.state).encode()
 
 		multicast_group = (self.group, self.port)
 
@@ -97,7 +132,7 @@ class MulticastPeer():
 
 		# The socket does not block
 		# indefinitely when trying to receive data.
-		sock.settimeout(3)
+		sock.setblocking(0)
 
 		# Set the time-to-live for messages to 1 so they do not
 		# go past the local network segment.
@@ -107,47 +142,69 @@ class MulticastPeer():
 		try:
 			# Send data to the multicast group
 			sent = sock.sendto(msg, multicast_group)
-
-		except Exception:
-			return 2
-
+		except:
+			raise
 		else:
-			while True:
-				try:
-					data, address=sock.recvfrom(4096, socket.MSG_DONTWAIT)
-				except socket.timeout:
-					sock.close()
-					return 1
-				else:
-					if not data:
-						await asyncio.sleep(0.1)
-						continue
+			# Sockets from which we expect to read
+			inputs=[sock]
 
-					if verbose_flag:
-						print('\nPeer [{0}]:'.format(self.id), end=' ')
-						print('{!r} received from {}'.format(data, address))
+			# Sockets to which we expect to write
+			outputs=[]
 
-					received_message=data.decode().split(' ')
+			while inputs:
+				readable, writable, exceptional = select.select(\
+					inputs, outputs, inputs, 0)
+				
+				if len(readable) == 0:
+					await asyncio.sleep(0.01)
 
-					res={}
+				for s in readable:
+					if s is sock:
+						try:
+							data, address=s.recvfrom(4096)
+						except:
+							raise
+						else:
+							if not data:
+								await asyncio.sleep(0.01)
+								continue
 
-					res['id']=received_message[0]
-					res['time']=received_message[1]
-					res['status']=received_message[2]
-					res['address']=address
+							received_message=data.decode().split(' ')
 
-					self.responses.append(res)
+							res={}
+
+							res['id']=received_message[0]
+							res['time']=received_message[1]
+							res['status']=received_message[2]
+							res['address']=address
+
+							if res['status'] == 'WANTED':
+								if self.state == 'HELD' or \
+										(self.state == 'WANTED' and \
+											self.request_time < res['time'] and \
+												self.request_time > 0):
+												# self.request_time > 0 because it was initializes
+												#  with -1
+									self.queue.append(res)
+								else:
+									sock.sendto(
+										'{0} {1} {2}'.format(
+											self.id, time(), self.state),
+										address)
+
+							self.responses.append(res)
+
+							if len(self.responses) == len(self.group_members):
+								self.state = 'HELD'
+								self.responses = []
+								inputs.remove(sock)
 
 		finally:
-			if len(self.responses) == len(self.group_members):
-				self.state = 'HELD'
 			sock.close()
-			return 0
+		
+		return 0
 
-	def release_lock(self):
-		pass
 
-	
 	async def listen(self, verbose_flag: bool=True) -> None:
 		"""
 		Args:
@@ -187,30 +244,17 @@ class MulticastPeer():
 		inputs=[sock]
 
 		# Sockets to which we expect to write
-		outputs=[self.pipe_end]
-
-		# Outgoing message queues (socket:Queue)
-		message_queues={}
+		outputs=[]
 
 		while inputs:
 			# Wait for at least one of the sockets to be
 			# ready for processing
-			# if verbose_flag:
-			# 	print('\nPeer [{0}]:'.format(self.id), end=' ')
-			# 	print('waiting for the next event', file=sys.stderr)
 
-			readable, writable, exceptional=select.select(inputs,
-															outputs,
-															inputs)
-
-			# select() returns three new lists, containing subsets of
-			# the contents of the lists passed in. All of the sockets
-			# in the readable list have incoming data buffered and
-			# available to be read. All of the sockets in the writable
-			# list have free space in their buffer and can be written to.
-			# The sockets returned in exceptional have had an error (the
-			# actual definition of “exceptional condition” depends on
-			# the platform).
+			try:
+				readable, writable, exceptional = select.select(\
+					inputs, outputs, inputs, 0)
+			except ValueError:
+				pass
 
 			if len(readable) == 0:
 				await asyncio.sleep(0.01)
@@ -233,26 +277,7 @@ class MulticastPeer():
 						newmsg['status']=received_message[2]
 						newmsg['address']=address
 
-						if newmsg['status'] == 'WANTED':
-							if verbose_flag:
-								print('\nPeer [{0}]:'.format(self.id), end=' ')
-								print(address, '({0}) wants the resource'.format(
-									newmsg['id']))
-
-							if self.state == 'HELD' or \
-									(self.state == 'WANTED' and \
-										self.request_time < newmsg['time'] and \
-											self.request_time > 0):
-											# self.request_time > 0 because it was initializes
-											#  with -1
-								self.queue.append(newmsg)
-							else:
-								sock.sendto(
-									'{0} {1} {2}'.format(
-										self.id, time(), self.state),
-									address)
-
-						elif newmsg['status'] == 'JOIN' and \
+						if newmsg['status'] == 'JOIN' and \
 								newmsg['id'] != self.id and \
 								newmsg['id'] not in self.group_members:
 
@@ -263,7 +288,10 @@ class MulticastPeer():
 								print(address, '({0}) joined the group'.format(
 									newmsg['id']))
 
-						elif newmsg['id'] != self.id:
+							sock.sendto('{0} {1} {2}'.format(self.id, time(), 'ACK')
+										.encode(), address)
+
+						elif newmsg['id'] != self.id and newmsg['status'] != 'ACK':
 							if verbose_flag:
 								print('\nPeer [{0}]:'.format(self.id), end=' ')
 								print('received {} bytes from {}'.format(
@@ -273,5 +301,5 @@ class MulticastPeer():
 							sock.sendto('{0} {1} {2}'.format(self.id, time(), 'ACK')
 										.encode(), address)
 
-					except Exception:
-						raise Exception('Unknown exception')
+					except:
+						raise

@@ -28,37 +28,3 @@ async def send(self, message: bytes, verbose_flag: bool = True) -> int:
 		try:
 			# Send data to the multicast group
 			sent = sock.sendto(message, multicast_group)
-
-		except Exception:
-			return 2
-
-		else:
-			while True:
-				try:
-					data, address=sock.recvfrom(4096, socket.MSG_DONTWAIT)
-				except socket.timeout:
-					sock.close()
-					return 1
-				else:
-					if not data:
-						await asyncio.sleep(0.5)
-						continue
-
-					if verbose_flag:
-						print('\nPeer [{0}]:'.format(self.id), end=' ')
-						print('{!r} received from {}'.format(data, address))
-
-					received_message=data.decode().split(' ')
-
-					res={}
-
-					res['id']=received_message[0]
-					res['time']=received_message[1]
-					res['status']=received_message[2]
-					res['address']=address
-
-					self.responses.append(res)
-
-		finally:
-			sock.close()
-			return 0
