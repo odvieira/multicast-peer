@@ -1,31 +1,26 @@
-import multiprocessing as mp
 import asyncio
-import os
+import multiprocessing
+from random import randint
+
 from MulticastPeer import MulticastPeer
 
-def current_state(element:MulticastPeer=[]):
-    print('===================================')
-    print('ID: {0}\tState: {1}'.format(element.id, element.state))
-    
-def clear():
-    os.system('clear')
+async def send_command(c:str, p:multiprocessing.Pipe) -> int:
+	p.send('JOIN')
+
+	return 0
+
+async def main():
+    peer_pipe_rcv, peer_pipe_snd =  multiprocessing.Pipe(duplex=False) 
+
+    peer = MulticastPeer(randint(0,100), peer_pipe_rcv)
+
+    await asyncio.gather(
+        peer.listen(),
+        peer.active(),
+				send_command('JOIN', peer_pipe_snd)
+    )
 
 if __name__ == '__main__':
-    mp.set_start_method('spawn')
-    main_queue = mp.Queue()
+    asyncio.run(main())
 
-    peers = []
-
-    for i in range(2):
-        peers.append(MulticastPeer(i))
-        peers[i].start()
-
-    # while True:
-    #     clear()
-
-    #     for p in peers:
-    #         current_state(p)
-
-    #     print('===================================\n\n')
-
-    #     action = input('Action: ')
+    
