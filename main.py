@@ -29,16 +29,23 @@ def send_command_request() -> None:
     peer_pipe_snd.send('RLOCK')
 
 
+def send_command_exit() -> None:
+    peer_pipe_snd.send('EXIT')
+
 async def main():
     root_obj = tkinter.Tk()
 
     button_join = tkinter.Button(
         root_obj, text="Join", command=send_command_join)
-    button_join.pack(side='left', expand=1)
+    button_join.pack(side='top', expand=1)
 
     button_request = tkinter.Button(
         root_obj, text="Request", command=send_command_request)
-    button_request.pack(side='left', expand=1)
+    button_request.pack(side='top', expand=1)
+
+    button_exit = tkinter.Button(
+        root_obj, text="exit", command=send_command_exit)
+    button_exit.pack(side='top', expand=1)
 
     peer = MulticastPeer(id=randint(0, 100), pipe_end=peer_pipe_rcv)
 

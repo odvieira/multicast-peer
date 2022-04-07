@@ -32,6 +32,7 @@ class MulticastPeer():
         self.request_time = -1.0
         self.inputs = []
         self.outputs = []
+        self.exit = False
 
         self.multicast_group = (self.group, self.port)
 
@@ -54,6 +55,12 @@ class MulticastPeer():
         self.join_sock.setsockopt(
             socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
 
+        return
+
+    def close(self):
+        self.listener_socket.close()
+        self.join_sock.close()
+        self.lock_sock.close()
         return
 
     def create_lock_sock(self):
@@ -116,12 +123,18 @@ class MulticastPeer():
                     command_received = self.pipe_end.recv()
                 except EOFError:
                     self.pipe_end.close()
-                    exit(0)
+                    raise
+                except:
+                    raise
                 else:
                     if command_received == 'JOIN':
                         await self.join()
-                    if command_received == 'RLOCK':
+                    elif command_received == 'RLOCK':
                         await self.request_lock()
+                    elif command_received == 'EXIT':
+                        self.close()
+                        self.exit = True
+                        return
             else:
                 await asyncio.sleep(0.1)
 
@@ -163,6 +176,8 @@ class MulticastPeer():
         while True:
             # Wait for at least one of the sockets to be
             # ready for processing
+            if self.exit:
+                return
 
             if not len(self.inputs) > 0:
                 await asyncio.sleep(0.01)
