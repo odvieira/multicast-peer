@@ -364,7 +364,7 @@ class MulticastPeer():
                         # made after my request
                             self.add_response(res)
 
-                        if len(self.responses_to_alock) == len(
+                        if len(self.responses_to_alock) >= len(
                                 self.group_members):
                             self.responses_to_alock = []
                             self.inputs.remove(self.lock_sock)
@@ -379,7 +379,7 @@ class MulticastPeer():
 
         if self.pipe_state.writable:
             self.pipe_state.send(
-                'ID: {3} - Status: {0} - Group Members: {1} - Queue: {2}'
+                'ID: {3}\nGroup: {1}\nQueue: {2}\nStatus: {0}'
                 .format(self.state, self.group_members, q, self.id))
 
     def add_to_queue(self, request: dict):

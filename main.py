@@ -54,26 +54,27 @@ async def main():
 
     root_obj.title('Multicast Peer')
 
-    root_obj.geometry("480x200")
+    root_obj.geometry("320x320")
     root_obj.resizable(False, False)
 
     button_join = tkinter.Button(
-        root_obj, text="Join Group", command=send_command_join)
+        root_obj, width=25, activebackground='gold', text="Join Group", command=send_command_join)
     button_join.pack(side='top', expand=1)
 
     button_request = tkinter.Button(
-        root_obj, text="Acquire Lock", command=send_command_acquire_lock)
+        root_obj, width=25, activebackground='gold', text="Acquire Lock", command=send_command_acquire_lock)
     button_request.pack(side='top', expand=1)
 
     button_request = tkinter.Button(
-        root_obj, text="Release Lock", command=send_command_release_lock)
+        root_obj, width=25, activebackground='gold', text="Release Lock", command=send_command_release_lock)
     button_request.pack(side='top', expand=1)
 
     button_exit = tkinter.Button(
-        root_obj, text="Close connection", command=send_command_exit)
+        root_obj, width=25, activebackground='gold', text="Close Connection", command=send_command_exit)
     button_exit.pack(side='top', expand=1)
 
-    label_state = tkinter.Label(root_obj, bg='black', fg='green', width=80)
+    label_state = tkinter.Label(root_obj, bg='black', \
+        fg='green', width=80, justify='center', pady=8, font=("Noto mono", 12))
     label_state.pack(side='top')
 
     await asyncio.gather(
