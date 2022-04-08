@@ -17,7 +17,7 @@ class MulticastPeer():
 
     def __init__(self, id, pipe_command: multiprocessing.Pipe = None,
                     pipe_state_snd:multiprocessing.Pipe = None,
-                    group: str = '228.5.6.7', port: int = 6789):
+                    group: str = '228.151.26.111', port: int = 6789):
         self.group = group
         self.port = port
         self.state = 'DISCONNECTED'
@@ -53,10 +53,16 @@ class MulticastPeer():
         self.join_sock.setsockopt(
             socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, ttl)
 
+        self.update_screen()
+
         return
 
     async def close(self):
         self.release_lock()
+
+        await asyncio.sleep(0.5)
+
+        self.leave()
 
         await asyncio.sleep(0.5)
 
@@ -114,12 +120,25 @@ class MulticastPeer():
 
         return 0
 
-    def join(self):
+    def leave(self):
         self.group_members = []
 
         self.release_lock()
 
+        # Send data to the multicast group
+        sent = self.join_sock.sendto(
+            '{0} {1} {2}'.format(
+                self.id, time(), 'LEAVE').encode(), self.multicast_group)
+
+        self.change_state('DISCONNECTED')
+
+
+    def join(self):
+        self.group_members = []
+
         self.change_state('RELEASED')
+
+        self.release_lock()
         # Send data to the multicast group
         sent = self.join_sock.sendto(
             '{0} {1} {2}'.format(
@@ -261,7 +280,7 @@ class MulticastPeer():
                     res['status'] = received_message[2]
                     res['address'] = address
 
-                if res['id'] == self.id:
+                if res['id'] == self.id or self.state == 'DISCONNECTED':
                     continue
 
                 # Request comes in from another peer because he wants to
@@ -289,7 +308,6 @@ class MulticastPeer():
                                     self.id, time(), self.state).encode(),
                                 address)
                     elif res['status'] == 'JOIN' and \
-                            res['id'] != self.id and \
                             res['id'] not in self.group_members:
 
                         self.group_members.append(res['id'])
@@ -302,6 +320,11 @@ class MulticastPeer():
 
                         self.listener_socket.sendto('{0} {1} {2}'.format(
                             self.id, time(), 'ACK').encode(), address)
+                    
+                    elif res['status'] == 'LEAVE':
+                        if res['id'] in self.group_members:
+                            self.group_members.remove(res['id'])
+                            self.update_screen()
 
                     elif res['id'] != self.id and res['status'] != 'ACK':
                         self.listener_socket.sendto('{0} {1} {2}'.format(
