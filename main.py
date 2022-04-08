@@ -40,16 +40,19 @@ async def run_tk(root, interval=0.1, label_state: tkinter.Label = None) -> None:
 
             root.update()
             await asyncio.sleep(interval)
-    except tkinter.TclError as e:
-        if "application has been destroyed" not in e.args[0]:
-            raise
-        else:
-            exit(0)
+    # except tkinter.TclError as e:
+    #     if "application has been destroyed" not in e.args[0]:
+    #         raise
+    #     send_command_exit()
+    except:
+        send_command_exit()
+    finally:
+        return
 
 
 async def main():
     peer = MulticastPeer(id=randint(
-        0, 100), pipe_command=peer_pipe_rcv, pipe_state_snd=state_snd)
+        25, 99), pipe_command=peer_pipe_rcv, pipe_state_snd=state_snd)
 
     root_obj = tkinter.Tk()
 
