@@ -3,11 +3,7 @@ import multiprocessing
 import select
 import socket
 import struct
-import sys
 from time import time
-
-from async_generator import yield_
-
 
 class MulticastPeer():
     """
@@ -19,16 +15,18 @@ class MulticastPeer():
                                     [ID] [TIME] [STATUS]
     """
 
-    def __init__(self, id, pipe_end: multiprocessing.Pipe = None,
-                 group: str = '228.5.6.7', port: int = 6789):
+    def __init__(self, id, pipe_command: multiprocessing.Pipe = None,
+                    pipe_state_snd:multiprocessing.Pipe = None,
+                    group: str = '228.5.6.7', port: int = 6789):
         self.group = group
         self.port = port
-        self.state = 'RELEASED'
+        self.state = 'DISCONNECTED'
         self.queue = []
         self.group_members = []
         self.id = str(id)
-        self.responses_to_rlock = []
-        self.pipe_end = pipe_end
+        self.responses_to_alock = []
+        self.pipe_end = pipe_command
+        self.pipe_state = pipe_state_snd
         self.request_time = -1.0
         self.inputs = []
         self.outputs = []
@@ -57,10 +55,18 @@ class MulticastPeer():
 
         return
 
-    def close(self):
+    async def close(self):
+        self.release_lock()
+
+        await asyncio.sleep(0.5)
+
         self.listener_socket.close()
         self.join_sock.close()
         self.lock_sock.close()
+        self.pipe_end.close()
+        self.pipe_state.close()
+        self.exit = True
+
         return
 
     def create_lock_sock(self):
@@ -103,18 +109,28 @@ class MulticastPeer():
 
         self.listener_socket = sock
 
-        self.inputs.append(self.listener_socket)
+        if self.listener_socket not in self.inputs:
+            self.inputs.append(self.listener_socket)
 
         return 0
 
-    async def join(self):
+    def join(self):
+        self.group_members = []
+
+        self.release_lock()
+
+        self.change_state('RELEASED')
         # Send data to the multicast group
         sent = self.join_sock.sendto(
             '{0} {1} {2}'.format(
                 self.id, time(), 'JOIN').encode(), self.multicast_group)
+        
+        if self.join_sock not in self.inputs:
+            self.inputs.append(self.join_sock)
 
-        # Sockets from which we expect to read
-        self.inputs.append(self.join_sock)
+    def change_state(self, new_state:str):
+        self.state = new_state
+        self.update_screen()
 
     async def active(self):
         while True:
@@ -128,28 +144,60 @@ class MulticastPeer():
                     raise
                 else:
                     if command_received == 'JOIN':
-                        await self.join()
+                        self.join()
+                    elif command_received == 'ALOCK':
+                        self.acquire_lock()
                     elif command_received == 'RLOCK':
-                        await self.request_lock()
+                        self.release_lock()
                     elif command_received == 'EXIT':
-                        self.close()
-                        self.exit = True
+                        await self.close()
                         return
             else:
                 await asyncio.sleep(0.1)
 
     def release_lock(self):
-        pass
+        if self.state == 'DISCONNECTED':
+            return
 
-    async def request_lock(self, verbose_flag: bool = True) -> None:
+        self.change_state('RELEASED')
+
+        msg = '{0} {1} {2}'.format(
+            self.id, self.request_time,
+            self.state).encode()
+
+        for member in self.queue:
+            try:
+                # Send data to the group member
+                sent = self.lock_sock.sendto(msg, member['address'])
+            except:
+                raise
+
+        self.queue = []
+        self.responses_to_alock = []
+        self.update_screen()
+
+    def acquire_lock(self, verbose_flag: bool = True) -> None:
         """
         Args:
                         verbose_flag (bool, optional): Print to the output internal
                                                         states. Defaults to True.
         """
 
-        self.state = 'WANTED'
+        if self.state == 'WANTED' or self.state == 'HELD' or \
+            self.state == 'DISCONNECTED':
+            return
+
+        self.release_lock()
+
+        self.responses_to_alock = []
+        
         self.request_time = time()
+
+        if len(self.group_members) == 0:
+            self.change_state('HELD')
+            return
+
+        self.change_state('WANTED')        
 
         msg = '{0} {1} {2}'.format(
             self.id, self.request_time,
@@ -161,7 +209,8 @@ class MulticastPeer():
         except:
             raise
         else:
-            self.inputs.append(self.lock_sock)
+            if self.lock_sock not in self.inputs:
+                self.inputs.append(self.lock_sock)
 
     async def listen(self, verbose_flag: bool = True) -> None:
         """
@@ -179,7 +228,7 @@ class MulticastPeer():
             if self.exit:
                 return
 
-            if not len(self.inputs) > 0:
+            if not len(self.inputs) > 0 and not len(self.outputs) > 0:
                 await asyncio.sleep(0.01)
 
             try:
@@ -188,7 +237,7 @@ class MulticastPeer():
             except:
                 raise
 
-            if not len(readable) > 0:
+            if not len(readable) > 0 and not len(writable) > 0:
                 await asyncio.sleep(0.01)
 
             for s in readable:
@@ -212,12 +261,17 @@ class MulticastPeer():
                     res['status'] = received_message[2]
                     res['address'] = address
 
+                if res['id'] == self.id:
+                    continue
+
+                # Request comes in from another peer because he wants to
+                # use the resource
                 if s is self.listener_socket:
                     if res['status'] == 'WANTED':
                         if self.state == 'HELD' or \
                                 (self.state == 'WANTED' and
                                  self.request_time < res['time'] and
-                                 self.request_time > 0):
+                                 self.request_time > 0 and res['time'] > 0):
                             # self.request_time > 0 because it was initializes
                             #  with -1
 
@@ -234,12 +288,12 @@ class MulticastPeer():
                                 '{0} {1} {2}'.format(
                                     self.id, time(), self.state).encode(),
                                 address)
-
                     elif res['status'] == 'JOIN' and \
                             res['id'] != self.id and \
                             res['id'] not in self.group_members:
 
                         self.group_members.append(res['id'])
+                        self.update_screen()
 
                         if verbose_flag:
                             print('\nPeer [{0}]:'.format(self.id), end=' ')
@@ -256,42 +310,66 @@ class MulticastPeer():
                 elif s is self.join_sock:
                     if res['id'] not in self.group_members:
                         self.group_members.append(res['id'])
+                        self.update_screen()
 
-                    self.inputs.remove(self.join_sock)
-
+                # This response comes in when I request the resource and someone
+                # sends back his state to me
                 elif s is self.lock_sock:
                     if res['status'] == 'WANTED':
                         if self.state == 'HELD' or \
                                 (self.state == 'WANTED' and
                                  self.request_time < res['time'] and
-                                 self.request_time > 0):
+                                 self.request_time > 0 and res['time'] > 0):
                             # self.request_time > 0 because it was initializes
                             #  with -1
 
                             self.add_to_queue(res)
 
+                            if not self.state == 'HELD':
+                                # Only count those responses to my request that was
+                                # made after my request
+                                self.add_response(res)
                         else:
                             self.lock_sock.sendto(
                                 '{0} {1} {2}'.format(
                                     self.id, time(), self.state),
                                 address)
 
-                        # Only count responsed to my request
-                        self.responses_to_rlock.append(res)
+                    if self.state == 'WANTED':
+                        if res['status'] == 'RELEASED':
+                        # Only count those responses to my request that was
+                        # made after my request
+                            self.add_response(res)
 
-                        if len(self.responses_to_rlock) == len(
+                        if len(self.responses_to_alock) == len(
                                 self.group_members):
-
-                            self.state = 'HELD'
-                            self.responses_to_rlock = []
+                            self.responses_to_alock = []
                             self.inputs.remove(self.lock_sock)
+                            self.request_time = -1.0
+                            self.change_state('HELD')                   
+
+
+    def update_screen(self):
+        q = []
+        for i in self.queue:
+            q.append(i['id'])
+
+        if self.pipe_state.writable:
+            self.pipe_state.send(
+                'ID: {3} - Status: {0} - Group Members: {1} - Queue: {2}'
+                .format(self.state, self.group_members, q, self.id))
 
     def add_to_queue(self, request: dict):
-        already_in_the_queue = False
-
         for e in self.queue:
             if request['id'] == e['id']:
-                already_in_the_queue = True
+                self.queue.remove(e)
+        
+        self.queue.append(request)
+        self.update_screen()
 
-        if not already_in_the_queue:
-            self.queue.append(request)
+    def add_response(self, request:dict):
+        for e in self.responses_to_alock:
+            if e['id'] == request['id']:
+                self.responses_to_alock.remove(e)
+
+        self.responses_to_alock.append(request)
